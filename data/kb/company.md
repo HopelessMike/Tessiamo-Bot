@@ -1,0 +1,2 @@
+# Chi è Tessiamo (Sintesi)
+Tessiamo stampa e vende tessuti e pannelli personalizzati. Le fantasie sono suddivise per categorie (Bambini, Adulti, Casa e arredo, Festività). È possibile acquistare tessuti al metro, pannelli pronti da ritagliare e prodotti sagomati (es. bavaglini, shopper, segnalibri). La stampa personalizzata è disponibile su varie basi. Materiali e processi sono indicati come conformi a certificazioni come OEKO-TEX. Per consulenze e ordini particolari è possibile contattare lo staff via email/WhatsApp.
