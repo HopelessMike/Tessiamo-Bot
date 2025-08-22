@@ -1,0 +1,13 @@
+---
+title: Pannelli in tessuto – guida completa
+source_url: https://tessiamo.it/3-pannelli-in-tessuto
+---
+# Pannelli in tessuto
+
+I **Pannelli in tessuto** sono un’altra modalità di acquisto proposta da Tessiamo, pensata per progetti in cui il tessuto viene utilizzato in formati predefiniti anziché a metraggio continuo. In questa sezione, le fantasie sono vendute “a pannello”, cioè come tagli di stoffa di **dimensioni fisse** (per esempio un rettangolo 50x70 cm con una data grafica). Ogni pannello rappresenta tipicamente un **soggetto o composizione grafica completa** stampata su tessuto: una volta acquistato, il cliente riceve quel pezzo di stoffa tale e quale, pronto per essere utilizzato nel suo progetto (ad esempio per creare un cuscino, un quadretto in tessuto, un inserto per quilting, ecc.).
+
+Anche nei pannelli Tessiamo mantiene un alto grado di **personalizzazione**: selezionando un pannello, è possibile in molti casi scegliere il **materiale** (la base tessile) su cui esso verrà stampato, nonché le **dimensioni** tra quelle offerte (alcune grafiche possono avere più taglie di pannello disponibili, ad es. piccolo, medio, grande). Inoltre, per certi pannelli Tessiamo consente di **aggiungere una scritta personalizzata**, come un nome o una breve frase, integrata nella grafica – funzione utile ad esempio per pannelli nascita, quadretti personalizzati, ecc.. Il cliente può infine indicare la **quantità in pezzi** qualora servano più pannelli uguali.
+
+Come per i tessuti al metro, la pagina Pannelli include **filtri tematici** e di ricerca per agevolare l’utente nella scelta della fantasia ideale. Ad esempio, si possono visualizzare solo pannelli a tema bambini, oppure solo quelli natalizi, ecc. Una volta selezionato, il **pannello stampato** arriverà **esattamente delle misure specificate**, riducendo gli sprechi (non c’è bisogno di acquistare tessuto in eccesso) e garantendo un risultato su misura. L’utente dovrà semplicemente **ritagliare e cucire** il pannello secondo necessità: ad esempio, due pannelli uguali possono comporre i due lati di un cuscino, oppure un singolo pannello può essere rifinito come arazzo o inserito in una trapunta patchwork. Questa modalità di acquisto **semplifica** la realizzazione di progetti particolari, fornendo già il disegno nelle proporzioni volute e **velocizzando** il processo creativo.
+
+> **Esempi comuni**: pannelli per cuscini stampati – con un’immagine o fantasia centrata; pannelli per realizzare lavoretti come presine, calendari perpetui, mini tappeti gioco; oppure pannelli tematici, es. un pannello con un soggetto natalizio da trapuntare come centrotavola. Tessiamo offre decine di grafiche anche in questo formato.

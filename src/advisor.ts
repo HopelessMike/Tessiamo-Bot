@@ -1,43 +1,29 @@
 import OpenAI from "openai";
 import { CONFIG } from "./config";
-import { buildCatalogLink, LinkParams } from "./linkBuilder";
+import { getCanonicalLink } from "./catalogLinks";
 
 const openai = new OpenAI({ apiKey: CONFIG.OPENAI_API_KEY });
 
 type AdvisorJSON = {
+  // categoria macro obbligatoria
   category: "tessuti" | "pannelli" | "prodotti-sagomati" | "pronto-stampa",
-  fantasiePer?: "bambini" | "adulti" | "casa" | "festività",
-  soggetto?: "principesse" | "animali" | "floreale" | "sport" | "scuola" | "vintage" | "basic" | "microfantasie",
+  // (facoltativo) sotto-categoria tra quelle che abbiamo linkate
+  subCategory?: "bavaglini" | "shopper",
   reason: string
 };
-
-function toLinkParams(j: AdvisorJSON): LinkParams {
-  return {
-    category: j.category,
-    fantasiePer: j.fantasiePer,
-    soggetto: j.soggetto,
-    page: 1
-  };
-}
 
 export async function proposeRecommendation(params: {
   recentConversation: {role:'user'|'bot';content:string}[],
   userSummary?: string
 }) {
   const convo = params.recentConversation.map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n");
-
-  const system = `Sei un "Consigliere Tessile" per Tessiamo. 
-In base a conversazione e preferenze, suggerisci UNA categoria e (opzionalmente) facet per il catalogo.
-Devi restituire SOLO JSON valido con il seguente schema (senza testo extra):
-{
-  "category": "tessuti" | "pannelli" | "prodotti-sagomati" | "pronto-stampa",
-  "fantasiePer": "bambini" | "adulti" | "casa" | "festività" | null,
-  "soggetto": "principesse" | "animali" | "floreale" | "sport" | "scuola" | "vintage" | "basic" | "microfantasie" | null,
-  "reason": "breve motivazione in italiano (max 250 caratteri)"
-}
-Se non hai abbastanza segnali, scegli "tessuti" e lascia facet null.`;
-
-  const user = `Conversazione recente:\n${convo}\n\nProfilo sintetico (se presente):\n${params.userSummary || "—"}\n\nRestituisci il JSON richiesto.`;
+  const system = `Sei un "Consigliere Tessile" per Tessiamo.
+In base a conversazione e preferenze, scegli UNA categoria macro tra: tessuti, pannelli, prodotti-sagomati, pronto-stampa.
+Se pertinente, indica UNA subCategory tra: bavaglini, shopper.
+Rispondi SOLO con JSON valido:
+{"category": "...", "subCategory": "...", "reason": "max 250 caratteri in italiano"}
+Se non hai segnali chiari, scegli "tessuti" e ometti subCategory.`;
+  const user = `Conversazione recente:\n${convo}\n\nProfilo sintetico:\n${params.userSummary || "—"}\n\nRitorna il JSON.`;
 
   const out = await openai.chat.completions.create({
     model: CONFIG.CHAT_MODEL,
@@ -48,16 +34,12 @@ Se non hai abbastanza segnali, scegli "tessuti" e lascia facet null.`;
     temperature: 0.2
   });
 
-  const raw = out.choices[0]?.message?.content || "{}";
-  let parsed: AdvisorJSON;
+  let parsed: AdvisorJSON = { category: "tessuti", reason: "Dai un’occhiata ai tessuti al metro: è la scelta più versatile." };
   try {
-    parsed = JSON.parse(raw) as AdvisorJSON;
-  } catch {
-    parsed = { category: "tessuti", reason: "Suggerimento generico al catalogo principale." };
-  }
+    parsed = JSON.parse(out.choices[0]?.message?.content || "{}") as AdvisorJSON;
+  } catch { /* fallback di default già impostato */ }
 
-  const linkParams = toLinkParams(parsed);
-  const url = buildCatalogLink(linkParams);
-  const text = `Consiglio: ${parsed.reason || "Dai un'occhiata a questi prodotti."}\n${url}`;
-  return { text, url, linkParams, parsed };
+  const link = getCanonicalLink(parsed.subCategory || parsed.category) || getCanonicalLink(parsed.category) || getCanonicalLink("tessuti")!;
+  const text = `Consiglio: ${parsed.reason}\n${link}`;
+  return { text, url: link, parsed };
 }

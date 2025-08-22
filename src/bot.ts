@@ -1,65 +1,75 @@
-import { Telegraf, Markup } from "telegraf";
+import { Telegraf } from "telegraf";
 import { CONFIG } from "./config";
 import { upsertUser, addMessage, getUserMessageCountSinceLastSummary, getRecentConversation, upsertSummary, subscribe, getSummary } from "./db";
 import { answerWithRag } from "./rag";
 import { isOnTopic } from "./classifier";
 import { summarizeConversation } from "./summarizer";
-import { buildCatalogLink, inferLink } from "./linkBuilder";
 import { runBroadcast } from "./broadcast";
 import { proposeRecommendation } from "./advisor";
+import { catalogoMessage } from "./catalogLinks";
+import { transcribeTelegramVoice } from "./voice";
 
 export function createBot() {
   const bot = new Telegraf(CONFIG.TELEGRAM_BOT_TOKEN);
 
+  // Messaggio di benvenuto (copy aggiornato)
   bot.start(async (ctx) => {
     const u = ctx.from!;
-    upsertUser({
+    await upsertUser({
       id: u.id, username: u.username, first_name: u.first_name, last_name: u.last_name,
       language_code: u.language_code
     });
-    subscribe(u.id);
+    await subscribe(u.id);
 
-    const kbBtn = Markup.inlineKeyboard([
-      [Markup.button.url("Tessuti al metro", buildCatalogLink({ category: "tessuti", page: 1 }))],
-      [Markup.button.url("Pannelli in tessuto", buildCatalogLink({ category: "pannelli", page: 1 }))],
-      [Markup.button.url("Prodotti sagomati", buildCatalogLink({ category: "prodotti-sagomati", page: 1 }))],
-      [Markup.button.url("Pronto stampa (basi)", buildCatalogLink({ category: "pronto-stampa", page: 1 }))]
-    ]);
+    const welcome =
+`🎨 Ciao, sono *Ale di Tessiamo*!  
+Il tuo consulente tessile: ti aiuto a scegliere il tessuto giusto, capire gli usi migliori e trovare subito i prodotti che cerchi.
 
-    await ctx.reply(
-      "Ciao! 👋 Sono il bot di Tessiamo. Posso aiutarti a scegliere il tessuto giusto, consigliare gli usi migliori e darti link diretti al catalogo.\n" +
-      "Scrivimi pure cosa stai cercando (es. \"pannelli principesse per bambini\", \"tessuto per tovaglie\").",
-      kbBtn
-    );
+👉 Cosa puoi chiedermi:
+• “Che tessuto consigli per tovaglie resistenti?”  
+• “Avete pannelli con principesse per bambini?”  
+• “Quali basi sono adatte alla stampa?”  
+
+💬 Scrivimi *oppure inviami un vocale*: lo trascrivo e ti rispondo al volo.  
+📚 Se vuoi esplorare da solo:
+${catalogoMessage()}`;
+
+    await ctx.reply(welcome, { parse_mode: "Markdown" });
   });
 
   bot.help(async (ctx) => {
-    await ctx.reply("📌 Posso aiutarti con:\n• Consigli su basi tessuto e usi\n• Link al catalogo con filtri\n• Info su stampa personalizzata\n• Promozioni e novità\nComandi: /catalogo /consiglio /promo");
+    const txt =
+`Posso aiutarti con:
+• Consigli su basi tessuto e usi
+• Link reali al catalogo (solo link ufficiali dalla nostra KB)
+• Info su stampa personalizzata
+• Novità e promozioni (quando disponibili)
+
+Comandi: /catalogo /consiglio /promo`;
+    await ctx.reply(txt);
   });
 
+  // /catalogo — solo testo con link (niente bottoni)
   bot.command("catalogo", async (ctx) => {
-    const kb = Markup.inlineKeyboard([
-      [Markup.button.url("Tessuti al metro", buildCatalogLink({ category: "tessuti", page: 1 }))],
-      [Markup.button.url("Pannelli in tessuto", buildCatalogLink({ category: "pannelli", page: 1 }))],
-      [Markup.button.url("Prodotti sagomati", buildCatalogLink({ category: "prodotti-sagomati", page: 1 }))],
-      [Markup.button.url("Pronto stampa (basi)", buildCatalogLink({ category: "pronto-stampa", page: 1 }))]
-    ]);
-    await ctx.reply("Ecco il nostro catalogo 👇", kb);
+    await ctx.reply(catalogoMessage(), { parse_mode: "Markdown" });
   });
 
+  // /promo
   bot.command("promo", async (ctx) => {
     await ctx.reply("🎉 Al momento non ci sono promozioni attive. Continua a seguirci qui: annunceremo qui le prossime offerte!");
   });
 
+  // /consiglio — analizza chat/summary e propone un link *canonico* dalla mappa
   bot.command("consiglio", async (ctx) => {
     const u = ctx.from!;
-    const conv = getRecentConversation(u.id, 40);
-    const summary = getSummary(u.id);
-    const { text } = await proposeRecommendation({ recentConversation: conv, userSummary: summary });
-    addMessage(u.id, "bot", text);
-    await ctx.reply(text, { link_preview_options: { is_disabled: false } });
+    const conv = await getRecentConversation(u.id, 40);
+    const summary = await getSummary(u.id);
+    const { text } = await proposeRecommendation({ recentConversation: conv, userSummary: summary || undefined });
+    await addMessage(u.id, "bot", text);
+    await ctx.reply(text);
   });
 
+  // Admin: /broadcast <testo>
   bot.command("broadcast", async (ctx) => {
     if (!CONFIG.ADMIN_IDS.includes(ctx.from?.id || 0)) {
       return ctx.reply("❌ Comando riservato allo staff Tessiamo.");
@@ -71,52 +81,85 @@ export function createBot() {
     await ctx.reply(`✅ Broadcast completato: inviati ${res.sent}/${res.total} (falliti: ${res.failed}).`);
   });
 
+  // Handler TESTO (senza “prelink” automatico, niente bottoni)
   bot.on("text", async (ctx) => {
     const u = ctx.from!;
     const text = ctx.message.text.trim();
 
-    upsertUser({
+    await upsertUser({
       id: u.id, username: u.username, first_name: u.first_name, last_name: u.last_name,
       language_code: u.language_code
     });
-    addMessage(u.id, "user", text);
+    await addMessage(u.id, "user", text);
 
     const onTopic = await isOnTopic(text);
     if (!onTopic) {
-      const msg = "Capisco la curiosità 😊 ma posso aiutarti solo su tessuti, stampa personalizzata e prodotti Tessiamo. Vuoi un consiglio per il tuo progetto o un link al catalogo?";
-      addMessage(u.id, "bot", msg);
+      const msg = "Capisco la curiosità 😊 ma posso aiutarti solo su tessuti, stampa personalizzata e prodotti Tessiamo. Vuoi un consiglio per il tuo progetto o un link al catalogo (/catalogo)?";
+      await addMessage(u.id, "bot", msg);
       return ctx.reply(msg);
     }
 
-    const inferred = inferLink(text);
-    if (inferred) {
-      const url = buildCatalogLink(inferred);
-      await ctx.reply(`Potrebbe interessarti dare un'occhiata qui:\n${url}`, { link_preview_options: { is_disabled: false } });
-    }
-
-    const recent = getRecentConversation(u.id, 14);
-    const summary = getSummary(u.id);
+    const recent = await getRecentConversation(u.id, 14);
+    const summary = await getSummary(u.id);
     const answer = await answerWithRag({
       userQuery: text,
-      userSummary: summary,
+      userSummary: summary || undefined,
       recentConversation: recent
     });
 
-    addMessage(u.id, "bot", answer);
-    await ctx.reply(answer, {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "Tessuti per Bambini", url: buildCatalogLink({ category: "tessuti", fantasiePer: "bambini" }) }],
-          [{ text: "Pannelli Principesse", url: buildCatalogLink({ category: "pannelli", fantasiePer: "bambini", soggetto: "principesse" }) }]
-        ]
-      }
-    });
+    await addMessage(u.id, "bot", answer);
+    await ctx.reply(answer);
 
-    const c = getUserMessageCountSinceLastSummary(u.id);
+    const c = await getUserMessageCountSinceLastSummary(u.id);
     if (c >= CONFIG.SUMMARY_EVERY_N_USER_MSGS) {
-      const conv = getRecentConversation(u.id, 40);
+      const conv = await getRecentConversation(u.id, 40);
       const s = await summarizeConversation(conv);
-      upsertSummary(u.id, s);
+      await upsertSummary(u.id, s);
+    }
+  });
+
+  // Handler VOCE (Whisper open-source -> testo -> stesso flusso del testo)
+  bot.on("voice", async (ctx) => {
+    const u = ctx.from!;
+    const voice = ctx.message.voice;
+    if (!voice) return;
+
+    try {
+      const transcript = await transcribeTelegramVoice(bot, voice.file_id);
+      // Log utente (come testo)
+      await upsertUser({
+        id: u.id, username: u.username, first_name: u.first_name, last_name: u.last_name,
+        language_code: u.language_code
+      });
+      await addMessage(u.id, "user", `[VOCale] ${transcript}`);
+
+      const onTopic = await isOnTopic(transcript);
+      if (!onTopic) {
+        const msg = "Grazie per il vocale! Posso aiutarti solo su tessuti, stampa personalizzata e prodotti Tessiamo. Vuoi un consiglio o il link al catalogo (/catalogo)?";
+        await addMessage(u.id, "bot", msg);
+        return ctx.reply(msg);
+      }
+
+      const recent = await getRecentConversation(u.id, 14);
+      const summary = await getSummary(u.id);
+      const answer = await answerWithRag({
+        userQuery: transcript,
+        userSummary: summary || undefined,
+        recentConversation: recent
+      });
+
+      await addMessage(u.id, "bot", answer);
+      await ctx.reply(answer);
+
+      const c = await getUserMessageCountSinceLastSummary(u.id);
+      if (c >= CONFIG.SUMMARY_EVERY_N_USER_MSGS) {
+        const convForSummary = await getRecentConversation(u.id, 40);
+        const s = await summarizeConversation(convForSummary);
+        await upsertSummary(u.id, s);
+      }
+    } catch (e:any) {
+      console.error("Errore trascrizione:", e);
+      await ctx.reply("Non riesco a sentire bene il vocale 😅. Puoi riprovare o scrivermi in chat?");
     }
   });
 

@@ -4,19 +4,27 @@
   "description": "Chatbot Telegram per Tessiamo: Q&A su tessuti, link al catalogo, memoria conversazionale, broadcast e comandi /catalogo /consiglio /promo.",
   "license": "MIT",
   "type": "commonjs",
-  "engines": { "node": ">=20.0.0" },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js",
+    "start": "node dist/src/index.js",
     "build": "tsc -p tsconfig.json",
     "ingest": "tsx src/ingest.ts",
     "reset-db": "tsx scripts/reset-db.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.3.0",
+    "@types/pg": "^8.15.5",
     "better-sqlite3": "^9.4.0",
     "dotenv": "^16.4.5",
+    "express": "^5.1.0",
+    "gray-matter": "^4.0.3",
     "openai": "^4.55.0",
+    "pg": "^8.16.3",
     "telegraf": "^4.16.3"
   },
   "devDependencies": {

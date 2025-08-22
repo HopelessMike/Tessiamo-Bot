@@ -3,7 +3,7 @@ import { listSubscribers } from "./db";
 import { CONFIG } from "./config";
 
 export async function runBroadcast(bot: Telegraf, text: string) {
-  const subs = listSubscribers();
+  const subs = await listSubscribers();
   const delayMs = Math.ceil(1000 / CONFIG.BROADCAST_RPS);
   let sent = 0, failed = 0;
 

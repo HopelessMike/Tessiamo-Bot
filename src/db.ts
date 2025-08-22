@@ -1,145 +1,252 @@
-import Database from "better-sqlite3";
+// db.ts (versione Neon/Postgres)
+import { Pool, PoolClient } from "pg";
 import { CONFIG } from "./config";
 
-export const db = new Database(CONFIG.DB_PATH);
+export const pool = new Pool({
+  connectionString: CONFIG.DATABASE_URL, // es: NEON_DATABASE_URL
+  max: CONFIG.PGPOOL_MAX,
+  ssl: { rejectUnauthorized: false },    // Neon richiede SSL
+});
 
-// DDL
-db.exec(`
-PRAGMA journal_mode = WAL;
-PRAGMA synchronous = NORMAL;
+// Set search path per usare lo schema bot_schema per tutte le connessioni
+pool.on('connect', async (client) => {
+  try {
+    await client.query('SET search_path TO bot_schema, public');
+  } catch (e) {
+    console.warn('Warning: Could not set search_path to bot_schema');
+  }
+});
 
-CREATE TABLE IF NOT EXISTS users (
-  telegram_id INTEGER PRIMARY KEY,
-  username TEXT,
-  first_name TEXT,
-  last_name TEXT,
-  language_code TEXT,
-  created_at INTEGER NOT NULL,
-  last_seen INTEGER NOT NULL
-);
+type SQLParams = any[];
 
-CREATE TABLE IF NOT EXISTS messages (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  telegram_id INTEGER NOT NULL,
-  role TEXT CHECK(role IN ('user','bot')) NOT NULL,
-  content TEXT NOT NULL,
-  ts INTEGER NOT NULL,
-  FOREIGN KEY(telegram_id) REFERENCES users(telegram_id)
-);
+// ------------------------
+// Helpers
+// ------------------------
+async function q(sql: string, params?: SQLParams, client?: PoolClient) {
+  const runner = client || pool;
+  return runner.query(sql, params);
+}
 
-CREATE INDEX IF NOT EXISTS idx_messages_user_ts ON messages(telegram_id, ts);
+function nowMs() {
+  return Date.now();
+}
 
-CREATE TABLE IF NOT EXISTS summaries (
-  telegram_id INTEGER PRIMARY KEY,
-  summary TEXT NOT NULL,
-  updated_at INTEGER NOT NULL
-);
+function cosine(a: number[], b: number[]): number {
+  let dot = 0, na = 0, nb = 0;
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    const x = a[i] || 0, y = b[i] || 0;
+    dot += x * y; na += x * x; nb += y * y;
+  }
+  if (na === 0 || nb === 0) return 0;
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
 
-CREATE TABLE IF NOT EXISTS kb_items (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  source_url TEXT,
-  title TEXT,
-  content TEXT NOT NULL,
-  embedding TEXT NOT NULL,
-  updated_at INTEGER NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_kb_updated ON kb_items(updated_at);
-
-CREATE TABLE IF NOT EXISTS subscriptions (
-  telegram_id INTEGER PRIMARY KEY,
-  since INTEGER NOT NULL
-);
-`);
-
-export function upsertUser(u: {
-  id: number; username?: string; first_name?: string; last_name?: string; language_code?: string;
+// ------------------------
+// Users
+// ------------------------
+export async function upsertUser(u: {
+  id: number;
+  username?: string;
+  first_name?: string;
+  last_name?: string;
+  language_code?: string;
 }) {
-  const now = Date.now();
-  db.prepare(`
+  const now = nowMs();
+  await q(
+    `
     INSERT INTO users (telegram_id, username, first_name, last_name, language_code, created_at, last_seen)
-    VALUES (@id, @username, @first_name, @last_name, @language_code, @now, @now)
-    ON CONFLICT(telegram_id) DO UPDATE SET
-      username=excluded.username,
-      first_name=excluded.first_name,
-      last_name=excluded.last_name,
-      language_code=excluded.language_code,
-      last_seen=excluded.created_at
-  `).run({ ...u, now });
+    VALUES ($1, $2, $3, $4, $5, $6, $6)
+    ON CONFLICT (telegram_id) DO UPDATE SET
+      username=EXCLUDED.username,
+      first_name=EXCLUDED.first_name,
+      last_name=EXCLUDED.last_name,
+      language_code=EXCLUDED.language_code,
+      last_seen=EXCLUDED.last_seen
+    `,
+    [u.id, u.username ?? null, u.first_name ?? null, u.last_name ?? null, u.language_code ?? null, now]
+  );
 }
 
-export function addMessage(telegram_id: number, role: 'user'|'bot', content: string) {
-  db.prepare(`INSERT INTO messages (telegram_id, role, content, ts) VALUES (?, ?, ?, ?)`)
-    .run(telegram_id, role, content, Date.now());
-  const row = db.prepare(`SELECT COUNT(*) AS c FROM messages WHERE telegram_id=?`).get(telegram_id) as { c: number };
-  const count = row.c || 0;
-  if (count > CONFIG.MAX_MESSAGES_PER_USER) {
-    db.prepare(`
-      DELETE FROM messages WHERE id IN (
-        SELECT id FROM messages WHERE telegram_id=?
-        ORDER BY ts ASC LIMIT ?
-      )
-    `).run(telegram_id, count - CONFIG.MAX_MESSAGES_PER_USER);
-  }
+// ------------------------
+// Messages
+// ------------------------
+export async function addMessage(
+  telegram_id: number,
+  role: "user" | "bot",
+  content: string,
+  ts: number = nowMs()
+) {
+  await q(
+    `INSERT INTO messages (telegram_id, role, content, ts) VALUES ($1, $2, $3, $4)`,
+    [telegram_id, role, content, ts]
+  );
 }
 
-export function getUserMessageCountSinceLastSummary(telegram_id: number): number {
-  const sum = db.prepare(`SELECT updated_at FROM summaries WHERE telegram_id=?`).get(telegram_id) as {updated_at:number}|undefined;
-  const since = sum?.updated_at || 0;
-  const row = db.prepare(`
-    SELECT COUNT(*) AS c FROM messages WHERE telegram_id=? AND role='user' AND ts>?`).get(telegram_id, since) as {c:number};
-  return row.c || 0;
+export async function countMessagesForUser(telegram_id: number): Promise<number> {
+  const r = await q(
+    `SELECT COUNT(*)::text AS c FROM messages WHERE telegram_id=$1`,
+    [telegram_id]
+  );
+  return Number(r.rows[0]?.c || 0);
 }
 
-export function getRecentConversation(telegram_id: number, limit = 16) {
-  return db.prepare(`
-    SELECT role, content FROM messages
-    WHERE telegram_id=?
-    ORDER BY ts DESC LIMIT ?
-  `).all(telegram_id, limit).reverse() as {role:'user'|'bot';content:string}[];
+export async function deleteOldestMessages(telegram_id: number, limit: number) {
+  await q(
+    `
+    DELETE FROM messages
+    WHERE id IN (
+      SELECT id FROM messages
+      WHERE telegram_id=$1
+      ORDER BY ts ASC
+      LIMIT $2
+    )
+    `,
+    [telegram_id, limit]
+  );
 }
 
-export function getSummary(telegram_id: number): string | undefined {
-  const row = db.prepare(`SELECT summary FROM summaries WHERE telegram_id=?`).get(telegram_id) as {summary?:string}|undefined;
-  return row?.summary;
+export async function getRecentMessages(
+  telegram_id: number,
+  limit: number
+): Promise<Array<{ role: "user" | "bot"; content: string }>> {
+  const r = await q(
+    `SELECT role, content FROM messages WHERE telegram_id=$1 ORDER BY ts DESC LIMIT $2`,
+    [telegram_id, limit]
+  );
+  return r.rows;
 }
 
-export function upsertSummary(telegram_id: number, summary: string) {
-  db.prepare(`
+export async function countUserMessagesSince(telegram_id: number, sinceTs: number): Promise<number> {
+  const r = await q(
+    `SELECT COUNT(*)::text AS c FROM messages WHERE telegram_id=$1 AND role='user' AND ts>$2`,
+    [telegram_id, sinceTs]
+  );
+  return Number(r.rows[0]?.c || 0);
+}
+
+// ------------------------
+// Summaries
+// ------------------------
+export async function getSummary(telegram_id: number): Promise<string | null> {
+  const r = await q(
+    `SELECT summary FROM summaries WHERE telegram_id=$1`,
+    [telegram_id]
+  );
+  return r.rows[0]?.summary ?? null;
+}
+
+export async function getSummaryUpdatedAt(telegram_id: number): Promise<number | null> {
+  const r = await q(
+    `SELECT updated_at::text AS updated_at FROM summaries WHERE telegram_id=$1`,
+    [telegram_id]
+  );
+  return r.rows.length ? Number(r.rows[0].updated_at) : null;
+}
+
+export async function upsertSummary(telegram_id: number, summary: string) {
+  const now = nowMs();
+  await q(
+    `
     INSERT INTO summaries (telegram_id, summary, updated_at)
-    VALUES (?, ?, ?)
-    ON CONFLICT(telegram_id) DO UPDATE SET summary=excluded.summary, updated_at=excluded.updated_at
-  `).run(telegram_id, summary, Date.now());
+    VALUES ($1, $2, $3)
+    ON CONFLICT (telegram_id) DO UPDATE
+      SET summary=EXCLUDED.summary, updated_at=EXCLUDED.updated_at
+    `,
+    [telegram_id, summary, now]
+  );
 }
 
-export function putKbItem(rec: {source_url?:string; title?:string; content:string; embedding:number[]}) {
-  db.prepare(`
+// ------------------------
+// Knowledge base (KB)
+// ------------------------
+export async function putKbItem(rec: {
+  source_url?: string;
+  title?: string;
+  content: string;
+  embedding: number[];
+}) {
+  await q(
+    `
     INSERT INTO kb_items (source_url, title, content, embedding, updated_at)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(rec.source_url||null, rec.title||null, rec.content, JSON.stringify(rec.embedding), Date.now());
+    VALUES ($1, $2, $3, $4::jsonb, $5)
+    `,
+    [rec.source_url ?? null, rec.title ?? null, rec.content, JSON.stringify(rec.embedding), nowMs()]
+  );
 }
 
-type KbRow = { id:number; source_url: string|null; title: string|null; content: string; embedding: string };
+type KbRow = {
+  id: number;
+  source_url: string | null;
+  title: string | null;
+  content: string;
+  embedding: any; // jsonb
+};
 
-export function queryKbByEmbedding(queryEmbedding: number[], k = 5) {
-  const rows = db.prepare(`SELECT id, source_url, title, content, embedding FROM kb_items`).all() as KbRow[];
-  function cosine(a:number[], b:number[]) { 
-    let dot=0, na=0, nb=0;
-    for (let i=0;i<a.length;i++){ dot+=a[i]*b[i]; na+=a[i]*a[i]; nb+=b[i]*b[i]; }
-    return dot / (Math.sqrt(na)*Math.sqrt(nb) + 1e-8);
+export async function searchKb(queryEmbedding: number[], k: number): Promise<
+  Array<{
+    id: number;
+    source_url?: string;
+    title?: string;
+    content: string;
+    score: number;
+  }>
+> {
+  // Piccolo dataset: calcolo in memoria
+  const r = await q(`SELECT id, source_url, title, content, embedding FROM kb_items`);
+  const scored = r.rows.map((row: any) => {
+    const emb = Array.isArray(row.embedding)
+      ? (row.embedding as number[])
+      : typeof row.embedding === "string"
+        ? (JSON.parse(row.embedding) as number[])
+        : (row.embedding as number[]);
+    return {
+      id: row.id,
+      source_url: row.source_url || undefined,
+      title: row.title || undefined,
+      content: row.content,
+      score: cosine(queryEmbedding, emb),
+    };
+  });
+  scored.sort((a: any, b: any) => b.score - a.score);
+  return scored.slice(0, k);
+}
+
+// ------------------------
+// Subscriptions (broadcast)
+// ------------------------
+export async function subscribe(telegram_id: number) {
+  await q(
+    `INSERT INTO subscriptions (telegram_id, since) VALUES ($1, $2)
+     ON CONFLICT (telegram_id) DO NOTHING`,
+    [telegram_id, nowMs()]
+  );
+}
+
+export async function listSubscribers(): Promise<number[]> {
+  const r = await q(`SELECT telegram_id::text FROM subscriptions`);
+  return r.rows.map((row: any) => Number(row.telegram_id));
+}
+
+// Missing functions needed by bot.ts
+export async function getUserMessageCountSinceLastSummary(telegram_id: number): Promise<number> {
+  const lastSummaryTs = await getSummaryUpdatedAt(telegram_id);
+  if (!lastSummaryTs) {
+    return await countMessagesForUser(telegram_id);
   }
-  const scored = rows.map(r => ({
-    id: r.id, source_url: r.source_url || undefined, title: r.title || undefined, content: r.content,
-    score: cosine(queryEmbedding, JSON.parse(r.embedding) as number[])
-  })).sort((a,b)=>b.score-a.score).slice(0,k);
-  return scored;
+  return await countUserMessagesSince(telegram_id, lastSummaryTs);
 }
 
-export function subscribe(telegram_id:number) {
-  db.prepare(`INSERT OR IGNORE INTO subscriptions (telegram_id, since) VALUES (?, ?)`).run(telegram_id, Date.now());
+export async function getRecentConversation(
+  telegram_id: number,
+  limit: number
+): Promise<Array<{ role: "user" | "bot"; content: string }>> {
+  const messages = await getRecentMessages(telegram_id, limit);
+  return messages.reverse(); // Return in chronological order
 }
 
-export function listSubscribers(): number[] {
-  const rows = db.prepare(`SELECT telegram_id FROM subscriptions`).all() as { telegram_id: number }[];
-  return rows.map((row) => row.telegram_id);
-}
+// ------------------------
+// Shutdown pulito
+// ------------------------
+process.once("SIGINT", () => pool.end());
+process.once("SIGTERM", () => pool.end());
