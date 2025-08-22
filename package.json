@@ -19,7 +19,6 @@
     "@types/express": "^5.0.3",
     "@types/node": "^24.3.0",
     "@types/pg": "^8.15.5",
-    "better-sqlite3": "^9.4.0",
     "dotenv": "^16.4.5",
     "express": "^5.1.0",
     "gray-matter": "^4.0.3",
@@ -28,7 +27,6 @@
     "telegraf": "^4.16.3"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.9",
     "tsx": "^4.19.2",
     "typescript": "^5.5.4"
   }
