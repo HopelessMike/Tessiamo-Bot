@@ -2,7 +2,6 @@ import { Telegraf } from "telegraf";
 import { CONFIG } from "./config";
 import { upsertUser, addMessage, getUserMessageCountSinceLastSummary, getRecentConversation, upsertSummary, subscribe, getSummary } from "./db";
 import { answerWithRag } from "./rag";
-import { isOnTopic } from "./classifier";
 import { summarizeConversation } from "./summarizer";
 import { runBroadcast } from "./broadcast";
 import { proposeRecommendation } from "./advisor";
@@ -66,7 +65,7 @@ Comandi: /catalogo /consiglio /promo`;
     const summary = await getSummary(u.id);
     const { text } = await proposeRecommendation({ recentConversation: conv, userSummary: summary || undefined });
     await addMessage(u.id, "bot", text);
-    await ctx.reply(text);
+    await ctx.reply(text, { parse_mode: "Markdown" });
   });
 
   // Admin: /broadcast <testo>
@@ -92,13 +91,6 @@ Comandi: /catalogo /consiglio /promo`;
     });
     await addMessage(u.id, "user", text);
 
-    const onTopic = await isOnTopic(text);
-    if (!onTopic) {
-      const msg = "Capisco la curiosità 😊 ma posso aiutarti solo su tessuti, stampa personalizzata e prodotti Tessiamo. Vuoi un consiglio per il tuo progetto o un link al catalogo (/catalogo)?";
-      await addMessage(u.id, "bot", msg);
-      return ctx.reply(msg);
-    }
-
     const recent = await getRecentConversation(u.id, 14);
     const summary = await getSummary(u.id);
     const answer = await answerWithRag({
@@ -108,7 +100,7 @@ Comandi: /catalogo /consiglio /promo`;
     });
 
     await addMessage(u.id, "bot", answer);
-    await ctx.reply(answer);
+    await ctx.reply(answer, { parse_mode: "Markdown" });
 
     const c = await getUserMessageCountSinceLastSummary(u.id);
     if (c >= CONFIG.SUMMARY_EVERY_N_USER_MSGS) {
@@ -133,13 +125,6 @@ Comandi: /catalogo /consiglio /promo`;
       });
       await addMessage(u.id, "user", `[VOCale] ${transcript}`);
 
-      const onTopic = await isOnTopic(transcript);
-      if (!onTopic) {
-        const msg = "Grazie per il vocale! Posso aiutarti solo su tessuti, stampa personalizzata e prodotti Tessiamo. Vuoi un consiglio o il link al catalogo (/catalogo)?";
-        await addMessage(u.id, "bot", msg);
-        return ctx.reply(msg);
-      }
-
       const recent = await getRecentConversation(u.id, 14);
       const summary = await getSummary(u.id);
       const answer = await answerWithRag({
@@ -149,7 +134,7 @@ Comandi: /catalogo /consiglio /promo`;
       });
 
       await addMessage(u.id, "bot", answer);
-      await ctx.reply(answer);
+      await ctx.reply(answer, { parse_mode: "Markdown" });
 
       const c = await getUserMessageCountSinceLastSummary(u.id);
       if (c >= CONFIG.SUMMARY_EVERY_N_USER_MSGS) {

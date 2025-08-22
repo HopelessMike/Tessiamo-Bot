@@ -6,7 +6,8 @@
       "Bash(npm run typecheck:*)",
       "Bash(npm run:*)",
       "Bash(npx tsx:*)",
-      "Bash(psql:*)"
+      "Bash(psql:*)",
+      "Bash(timeout 10s npm run dev)"
     ],
     "deny": [],
     "ask": []

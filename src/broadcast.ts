@@ -10,7 +10,10 @@ export async function runBroadcast(bot: Telegraf, text: string) {
   for (let i = 0; i < subs.length; i++) {
     const chatId = subs[i];
     try {
-      await bot.telegram.sendMessage(chatId, text, { link_preview_options: { is_disabled: true } });
+      await bot.telegram.sendMessage(chatId, text, { 
+        link_preview_options: { is_disabled: true },
+        parse_mode: "Markdown"
+      });
       sent++;
     } catch (e: any) {
       failed++;
