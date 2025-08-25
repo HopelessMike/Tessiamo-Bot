@@ -16,3 +16,4 @@ env.*
 pids
 pids/*
 logs
+.claude
