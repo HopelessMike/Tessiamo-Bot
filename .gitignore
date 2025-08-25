@@ -7,8 +7,9 @@ yarn-error.log*
 dist/
 
 # Env & DB
-.env
+.env.local
 data/tessiamo.db
+env.*
 
 # PM2 / logs
 *.log

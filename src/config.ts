@@ -1,6 +1,6 @@
 // config.ts (aggiornato)
 import * as dotenv from "dotenv";
-dotenv.config();
+dotenv.config({ path: ".env.local" });
 
 function must(name: string): string {
   const v = process.env[name];
